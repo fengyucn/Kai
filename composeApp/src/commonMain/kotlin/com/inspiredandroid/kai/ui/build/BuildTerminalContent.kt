@@ -297,7 +297,7 @@ internal fun BuildTerminalContent(
                         }
                     }
 
-                    // OSC 8 hyperlinks (Grok login puts the URL here, not as visible cells).
+                    // OSC 8 hyperlinks (agent logins may put the URL here, not as visible cells).
                     if (terminal.hyperlinks.isNotEmpty()) {
                         TerminalHyperlinkBar(urls = terminal.hyperlinks)
                     }

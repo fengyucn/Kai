@@ -55,8 +55,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "KaiBuild"
 
-/** Device-code pattern shown on Grok's login TUI (e.g. PNX4-ZGCX). */
-private val DEVICE_CODE_REGEX = Regex("""\b([A-Z0-9]{4}-[A-Z0-9]{4})\b""")
+/** Guest dirs that may hold agent binaries; derived from the agent catalog. */
+private val AGENT_BIN_DIRS: List<String> =
+    (BuildAgents.all.flatMap { it.binDirs } + "/usr/local/bin").distinct()
 
 private val INVALID_NAME_CHARS = Regex("[^A-Za-z0-9._-]+")
 
@@ -105,9 +106,6 @@ private class BuildSession(
 
     @Volatile
     var busy: Boolean = true
-
-    @Volatile
-    var lastDeviceCode: String? = null
 
     /** Cancels/reschedules when a new URL is captured so the bar stays for a full TTL. */
     var hyperlinkClearJob: Job? = null
@@ -596,9 +594,9 @@ class BuildEnvironmentManager(
         setStep(BuildStep.Agent, agentId = agent.id)
         ensureAgentPathProfile()
         val executor = executor()
+        val agentDirs = (AGENT_BIN_DIRS + "/root/.claude/downloads").joinToString(" ")
         executor.execute(
-            "mkdir -p /root/.local/bin /root/.grok/bin /root/.grok/downloads " +
-                "/root/.opencode/bin /root/.claude/downloads /usr/local/bin",
+            "mkdir -p $agentDirs",
             timeoutSeconds = 30,
         )
         val result = executor.execute(agent.installCommand, timeoutSeconds = 900)
@@ -610,10 +608,8 @@ class BuildEnvironmentManager(
             Log.w(TAG, "${agent.id} install failed (exit detail): ${result.failureDetail()}")
             val probe = executor.execute(
                 "command -v ${agent.binary} 2>/dev/null; " +
-                    "ls -la /root/.local/bin /root/.grok/bin /root/.opencode/bin /usr/local/bin 2>/dev/null; " +
-                    "ls -la /root/.local/share/claude/versions 2>/dev/null | tail -5; " +
-                    "ls -la /root/.grok/downloads 2>/dev/null | tail -5; " +
-                    "ls -la /root/.opencode/bin 2>/dev/null",
+                    "ls -la $agentDirs 2>/dev/null; " +
+                    "ls -la /root/.local/share/claude/versions 2>/dev/null | tail -5",
                 timeoutSeconds = 30,
             )
             Log.w(TAG, "${agent.id} post-install probe: ${probe.stdout} ${probe.stderr}")
@@ -628,13 +624,12 @@ class BuildEnvironmentManager(
 
     // --- terminal --------------------------------------------------------
 
-    /** Snapshot the screen, scan it for a device code, and push it to the UI. */
+    /** Snapshot the screen and push it to the UI. */
     private fun publishScreen(session: BuildSession) {
         val linksBefore = session.snapshot.hyperlinks
-        val text = session.refreshSnapshot()
-        noteDeviceCodeFromText(session, text)
+        session.refreshSnapshot()
         val linksAfter = session.snapshot.hyperlinks
-        // New URLs (OSC 8 / stream / device code) restart the auto-hide TTL.
+        // New URLs (OSC 8 / stream) restart the auto-hide TTL.
         if (linksAfter.isNotEmpty() && linksAfter != linksBefore) {
             scheduleHyperlinkClear(session)
         }
@@ -675,7 +670,7 @@ class BuildEnvironmentManager(
             // Resolve an absolute path under the non-login probe PATH: login shells
             // (`bash -lc`) reset PATH via /etc/profile, and vendor installers often
             // skip writing rc PATH lines when our proot env already included their
-            // bin dir — leaving only agents that force-wrote .bashrc (e.g. Grok).
+            // bin dir — leaving only agents that force-wrote shell rc (e.g. some vendors).
             val agentBinary = BuildAgents.get(session.agentId)?.binary
             val agentCmd = agentBinary?.let { resolveAgentCommand(it) }
             val launch = if (agentCmd != null) "$agentCmd; exec bash -l" else "exec bash -l"
@@ -710,7 +705,7 @@ class BuildEnvironmentManager(
                 },
             )
             session.handle = handle
-            // Poll Grok's URL capture file (and our BROWSER wrapper) while the shell runs.
+            // Poll the agent's URL capture file (and our BROWSER wrapper) while the shell runs.
             urlPollJob = scope.launch { pollOpenUrlFile(session) }
             val exit = handle.awaitExit()
             if (exit > 0) {
@@ -737,7 +732,7 @@ class BuildEnvironmentManager(
      * drops the proot-injected vendor dirs. Vendor installers often skip writing
      * PATH into shell rc when their bin dir is already on PATH during install —
      * so Claude (`~/.local/bin`) and OpenCode (`~/.opencode/bin`) vanish while
-     * Grok (always rewrites `.bashrc`) still works.
+     * agents that rewrite shell rc still work.
      *
      * A tiny `/etc/profile.d` snippet puts every agent bin dir back for login
      * shells without depending on vendor rc edits. Written on the host so it
@@ -749,7 +744,7 @@ class BuildEnvironmentManager(
         File(dir, "kai-build-path.sh").writeText(
             """
             |# Managed by Kai Build — keep coding-agent CLIs on PATH for login shells.
-            |export PATH="/root/.local/bin:/root/.grok/bin:/root/.opencode/bin${'$'}{PATH:+:${'$'}PATH}"
+            |export PATH="${AGENT_BIN_DIRS.joinToString(":")}${'$'}{PATH:+:${'$'}PATH}"
             |
             """.trimMargin(),
         )
@@ -760,7 +755,7 @@ class BuildEnvironmentManager(
      * Ensures the binary is linked into a known dir before probing.
      */
     private fun resolveAgentCommand(binary: String): String {
-        // Safe: [binary] is a fixed catalog name (claude/grok/opencode).
+        // Safe: [binary] is a fixed catalog name.
         val probe = executor()
         probe.ensureAgentBinary(binary)
         val path = probe.execute(
@@ -772,8 +767,8 @@ class BuildEnvironmentManager(
 
     /**
      * Installs `/usr/local/bin/kai-browser` into the rootfs so `$BROWSER` captures
-     * URLs Grok tries to open when no real display/browser exists under proot.
-     * The target file is per session, passed in as `KAI_OPEN_URL_FILE`.
+     * URLs an agent CLI tries to open when no real display/browser exists under
+     * proot. The target file is per session, passed in as `KAI_OPEN_URL_FILE`.
      */
     private fun ensureBrowserCaptureHelpers() {
         val script = File(paths.rootfsDir, "usr/local/bin/kai-browser")
@@ -824,34 +819,6 @@ class BuildEnvironmentManager(
             publishSessions()
             scheduleHyperlinkClear(session)
         }
-    }
-
-    /**
-     * When Grok shows a device code but never emits the auth URL on the PTY
-     * (confirmed via term-debug.log: zero https/OSC8), surface the known sign-in
-     * page plus the code so the user can complete login on the phone browser.
-     */
-    private fun noteDeviceCodeFromText(session: BuildSession, text: String) {
-        // Only treat as auth when the login copy is on screen. This runs on every
-        // repaint, so the keyword gate comes first: `contains(ignoreCase)` scans in
-        // place, where the regex and a lowercased copy of the whole screen allocate.
-        if (!text.contains("approve", ignoreCase = true) &&
-            !text.contains("signing in", ignoreCase = true) &&
-            !text.contains("browser", ignoreCase = true)
-        ) {
-            return
-        }
-        val code = DEVICE_CODE_REGEX.find(text)?.groupValues?.getOrNull(1) ?: return
-        if (code == session.lastDeviceCode) return
-        session.lastDeviceCode = code
-        session.withScreen { screen ->
-            screen.noteHyperlink("https://accounts.x.ai/sign-in")
-            // Bookmark-style deep link so the code is visible next to the URL in the bar.
-            screen.noteHyperlink("https://accounts.x.ai/sign-in#code=$code")
-        }
-        session.refreshSnapshot()
-        // TTL is scheduled by publishScreen when it sees the new links.
-        Log.i(TAG, "device code detected: $code — surface https://accounts.x.ai/sign-in")
     }
 
     /**
@@ -996,16 +963,12 @@ class BuildEnvironmentManager(
 
     private fun agentEnv(columns: Int, rows: Int, openUrlPath: String) = mapOf(
         "USER" to "root",
-        // Vendor installers: Claude → ~/.local/bin, Grok → ~/.grok/bin, OpenCode → ~/.opencode/bin.
-        // Keep every agent dir on PATH; shell rc files are not sourced for non-login probes.
-        "PATH" to "/root/.local/bin:/root/.grok/bin:/root/.opencode/bin:$DEFAULT_GUEST_PATH",
+        // Keep every catalog bin dir on PATH; shell rc files are not sourced for non-login probes.
+        "PATH" to (AGENT_BIN_DIRS.joinToString(":") + ":$DEFAULT_GUEST_PATH"),
         "COLORTERM" to "truecolor",
         "COLUMNS" to columns.toString(),
         "LINES" to rows.toString(),
-        // Grok opens the login URL via webbrowser; under proot there is no real browser.
-        // GROK_TEST_OPEN_URL_FILE is an official Grok hook that writes the URL to a file.
-        "GROK_TEST_OPEN_URL_FILE" to openUrlPath,
-        // Same target for the kai-browser wrapper, so both hooks feed one session's link bar.
+        // Generic browser capture: agents that call xdg-open/$BROWSER land here.
         "KAI_OPEN_URL_FILE" to openUrlPath,
         // webbrowser crate falls back to ${'$'}BROWSER when xdg-open is missing.
         "BROWSER" to "/usr/local/bin/kai-browser",
@@ -1020,27 +983,23 @@ private fun BuildProotExecutor.hasBinary(binary: String): Boolean =
  * `/root/.local/bin` (even when already on the probe PATH) so login shells that
  * only keep a subset of vendor dirs still find every agent by name.
  *
- * Known layouts:
- * - Claude: `~/.local/bin/claude` → `~/.local/share/claude/versions/<ver>`
- * - Grok: `~/.grok/bin/grok`
- * - OpenCode: `~/.opencode/bin/opencode`
+ * Known layouts are catalog-driven via [AGENT_BIN_DIRS]; Claude additionally
+ * keeps versioned binaries under `~/.local/share/claude/versions/<ver>`.
  */
 private fun BuildProotExecutor.ensureAgentBinary(binary: String): Boolean {
-    // Safe: [binary] is a fixed catalog name (claude/grok/opencode), not user input.
+    // Safe: [binary] is a fixed catalog name, not user input.
+    val candidateArgs = AGENT_BIN_DIRS.joinToString(" ") { dir -> "\"$dir/\$bin\"" }
     execute(
         """
         set -e
         bin='$binary'
         dest="/root/.local/bin/${'$'}bin"
         mkdir -p /root/.local/bin
-        # Prefer a real file under .local/bin; otherwise link from vendor dirs.
+        # Prefer a real file under .local/bin; otherwise link from catalog dirs.
         if [ -x "${'$'}dest" ] && [ ! -d "${'$'}dest" ]; then
             exit 0
         fi
-        for candidate in \
-            "/root/.grok/bin/${'$'}bin" \
-            "/root/.opencode/bin/${'$'}bin" \
-            "/usr/local/bin/${'$'}bin"
+        for candidate in $candidateArgs
         do
             if [ -x "${'$'}candidate" ] && [ ! -d "${'$'}candidate" ]; then
                 ln -sfn "${'$'}candidate" "${'$'}dest"

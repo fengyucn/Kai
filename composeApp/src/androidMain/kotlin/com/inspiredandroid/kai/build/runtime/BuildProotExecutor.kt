@@ -68,7 +68,7 @@ class BuildProotExecutor(
     /**
      * Runs [command] under a real PTY via python3 (always installed with base packages).
      *
-     * Important: we do **not** use bare `pty.spawn` alone — TUI apps (Grok, etc.) query
+     * Important: we do **not** use bare `pty.spawn` alone — TUI apps (coding agents, etc.) query
      * size via `TIOCGWINSZ`. A fresh PTY is often 0×0, so they paint nothing. We
      * `pty.fork()`, set winsize, SIGWINCH, then bridge master ↔ stdio.
      */

@@ -8,14 +8,8 @@ import kotlinx.collections.immutable.persistentListOf
  * The coding agents Kai Build can install on a fresh Debian. Each one ships a
  * self-contained installer, so the base system plus curl is all they need.
  *
- * Install locations (guest paths under `/root`):
- * - Claude → `~/.local/bin/claude` (versioned under `~/.local/share/claude/versions/`)
- * - Grok → `~/.grok/bin/grok`
- * - OpenCode → `~/.opencode/bin/opencode`
- *
- * Proot injects all three bin dirs into PATH for probes/installers. Login
- * shells rebuild PATH from profile files, so Kai Build also writes a
- * profile.d snippet and launches agents by absolute path.
+ * [binDirs] lists the guest directories a vendor installer may use; PATH and
+ * binary detection are derived from this catalog rather than hard-coded.
  */
 @Immutable
 data class BuildAgent(
@@ -24,6 +18,8 @@ data class BuildAgent(
     val title: String,
     val binary: String,
     val installCommand: String,
+    /** Guest dirs that may hold [binary] after install (for PATH and linking). */
+    val binDirs: List<String> = listOf("/root/.local/bin"),
 )
 
 object BuildAgents {
@@ -34,18 +30,21 @@ object BuildAgents {
             title = "Claude Code",
             binary = "claude",
             installCommand = "curl -fsSL https://claude.ai/install.sh | bash",
+            binDirs = listOf("/root/.local/bin"),
         ),
         BuildAgent(
-            id = "grok",
-            title = "Grok",
-            binary = "grok",
-            installCommand = "curl -fsSL https://x.ai/cli/install.sh | bash",
+            id = "qoder",
+            title = "Qoder CLI",
+            binary = "qodercli",
+            installCommand = "curl -fsSL https://qoder.com/install | bash",
+            binDirs = listOf("/root/.qoder/bin", "/root/.local/bin"),
         ),
         BuildAgent(
             id = "opencode",
             title = "OpenCode",
             binary = "opencode",
             installCommand = "curl -fsSL https://opencode.ai/install | bash",
+            binDirs = listOf("/root/.opencode/bin", "/root/.local/bin"),
         ),
     )
 

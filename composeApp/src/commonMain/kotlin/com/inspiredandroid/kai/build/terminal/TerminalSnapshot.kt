@@ -18,7 +18,7 @@ data class TerminalCell(
  * collectors recompose even when dimensions stay the same.
  *
  * [hyperlinks] are URIs extracted from OSC 8 sequences (xterm hyperlinks). TUIs
- * like Grok put login URLs there while showing only "click here" on the grid.
+ * like coding-agent CLIs put login URLs there while showing only "click here" on the grid.
  */
 @Immutable
 data class TerminalSnapshot(
