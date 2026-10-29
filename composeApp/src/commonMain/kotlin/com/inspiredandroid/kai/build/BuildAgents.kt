@@ -20,6 +20,8 @@ data class BuildAgent(
     val installCommand: String,
     /** Guest dirs that may hold [binary] after install (for PATH and linking). */
     val binDirs: List<String> = listOf("/root/.local/bin"),
+    /** Optional login URL template (`%s` = device code) for CLIs that only print a code. */
+    val deviceCodeUrlTemplate: String? = null,
 )
 
 object BuildAgents {
@@ -45,6 +47,8 @@ object BuildAgents {
             binary = "kimi",
             installCommand = "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
             binDirs = listOf("/root/.kimi-code/bin", "/root/.local/bin"),
+            // Kimi prints a long device-login URL that a narrow terminal may wrap.
+            deviceCodeUrlTemplate = "https://www.kimi.com/code/authorize_device?user_code=%s",
         ),
     )
 

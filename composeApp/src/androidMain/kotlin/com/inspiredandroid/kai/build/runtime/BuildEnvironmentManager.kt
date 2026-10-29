@@ -59,6 +59,10 @@ private const val TAG = "KaiBuild"
 private val AGENT_BIN_DIRS: List<String> =
     (BuildAgents.all.flatMap { it.binDirs } + "/usr/local/bin").distinct()
 
+/** Device-login codes such as `7JIW-51X4`, for catalogs that declare a URL template. */
+private val USER_CODE_REGEX =
+    Regex("""(?:user_code=|enter code[:：]?\s*)([A-Za-z0-9]{4}-[A-Za-z0-9]{4})""")
+
 private val INVALID_NAME_CHARS = Regex("[^A-Za-z0-9._-]+")
 
 /** Floor on the gap between two terminal repaints — roughly one display frame. */
@@ -106,6 +110,9 @@ private class BuildSession(
 
     @Volatile
     var busy: Boolean = true
+
+    /** Last device code surfaced for a catalog agent, to avoid duplicate links. */
+    var lastDeviceCode: String? = null
 
     /** Cancels/reschedules when a new URL is captured so the bar stays for a full TTL. */
     var hyperlinkClearJob: Job? = null
@@ -623,12 +630,13 @@ class BuildEnvironmentManager(
 
     // --- terminal --------------------------------------------------------
 
-    /** Snapshot the screen and push it to the UI. */
+    /** Snapshot the screen, surface device-code links, and push it to the UI. */
     private fun publishScreen(session: BuildSession) {
         val linksBefore = session.snapshot.hyperlinks
-        session.refreshSnapshot()
+        val text = session.refreshSnapshot()
+        noteAgentDeviceCode(session, text)
         val linksAfter = session.snapshot.hyperlinks
-        // New URLs (OSC 8 / stream) restart the auto-hide TTL.
+        // New URLs (OSC 8 / stream / device code) restart the auto-hide TTL.
         if (linksAfter.isNotEmpty() && linksAfter != linksBefore) {
             scheduleHyperlinkClear(session)
         }
@@ -785,6 +793,12 @@ class BuildEnvironmentManager(
             """.trimMargin(),
         )
         script.setExecutable(true, false)
+        // Node CLIs commonly call xdg-open directly instead of honoring $BROWSER.
+        for (name in listOf("xdg-open", "sensible-browser", "x-www-browser")) {
+            val wrapper = File(paths.rootfsDir, "usr/local/bin/$name")
+            wrapper.writeText("#!/bin/sh\nexec /usr/local/bin/kai-browser \"\$@\"\n")
+            wrapper.setExecutable(true, false)
+        }
     }
 
     private suspend fun pollOpenUrlFile(session: BuildSession) {
@@ -818,6 +832,22 @@ class BuildEnvironmentManager(
             publishSessions()
             scheduleHyperlinkClear(session)
         }
+    }
+
+    /**
+     * Some CLIs print only a short device code while the full login URL wraps or is
+     * clipped by a narrow terminal. When the agent catalog provides a URL template,
+     * rebuild the canonical link from the code shown on screen.
+     */
+    private fun noteAgentDeviceCode(session: BuildSession, text: String) {
+        val template = BuildAgents.get(session.agentId)?.deviceCodeUrlTemplate ?: return
+        if (!text.contains("code", ignoreCase = true)) return
+        val code = USER_CODE_REGEX.find(text)?.groupValues?.getOrNull(1) ?: return
+        if (code == session.lastDeviceCode) return
+        session.lastDeviceCode = code
+        session.withScreen { screen -> screen.noteHyperlink(template.format(code)) }
+        session.refreshSnapshot()
+        Log.i(TAG, "device code detected: $code")
     }
 
     /**

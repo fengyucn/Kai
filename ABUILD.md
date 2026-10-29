@@ -18,8 +18,13 @@ It is not intended for upstream merge unless maintainers want it.
   - **CodeBuddy** (`codebuddy`, `https://www.codebuddy.cn/cli/install.sh`)
   - **Qoder CLI** (`qodercli`, `https://qoder.com/install`)
   - **Kimi Code** (`kimi`, `https://code.kimi.com/kimi-code/install.sh`)
-- Removed vendor-specific login hints (x.ai device code); login URLs are captured generically from
-  PTY text, OSC 8/52 hyperlinks, and the `$BROWSER` wrapper.
+- Login capture for narrow terminals:
+  - The rootfs gets `xdg-open` / `sensible-browser` / `x-www-browser` wrappers that record the
+    URL into the in-app link bar (Node CLIs often call xdg-open instead of honoring `$BROWSER`).
+  - Catalog agents may declare `deviceCodeUrlTemplate`; when only a short device code is visible,
+    the canonical login URL is rebuilt from the code. Kimi Code uses this as a fallback.
+- Login URLs are captured generically from PTY text, OSC 8/52 hyperlinks, `$BROWSER`, and the
+  xdg-open wrappers; vendor-specific x.ai device-code hints were removed.
 
 ## Notes
 
