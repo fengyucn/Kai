@@ -80,5 +80,37 @@ class RootfsDownloader(private val httpClient: HttpClient) {
             }
             onProgress(1f)
         }
+        validateArchive(targetFile)
+    }
+
+    /**
+     * Some mirrors answer 200 with an HTML portal page (observed: HuaweiCloud LXC mirror),
+     * which previously got stored as `rootfs.tar.xz` and failed later with
+     * "input is not in the xz format". Check the archive magic before accepting it.
+     */
+    private fun validateArchive(file: File) {
+        val magic = ByteArray(6)
+        val read = file.inputStream().use { input ->
+            var offset = 0
+            while (offset < magic.size) {
+                val count = input.read(magic, offset, magic.size - offset)
+                if (count <= 0) break
+                offset += count
+            }
+            offset
+        }
+        val valid = when {
+            file.name.endsWith(".tar.xz") -> read == 6 && magic.contentEquals(XZ_MAGIC)
+            file.name.endsWith(".tar.gz") ->
+                read >= 2 && magic[0] == 0x1f.toByte() && magic[1] == 0x8b.toByte()
+            else -> true
+        }
+        if (!valid) {
+            throw IOException("Downloaded archive is not a valid ${file.name} (bad magic bytes)")
+        }
+    }
+
+    private companion object {
+        val XZ_MAGIC = byteArrayOf(0xFD.toByte(), 0x37, 0x7A, 0x58, 0x5A, 0x00)
     }
 }

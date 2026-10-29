@@ -12,17 +12,53 @@ private const val ALPINE_VERSION = "3.22.5"
 private const val ALPINE_BRANCH = "v3.22"
 
 private val ALPINE_MIRRORS = listOf(
+    // 国内镜像优先 (abuild): 经实测均可直接下载 minirootfs
+    "https://mirrors.tuna.tsinghua.edu.cn/alpine",
+    "https://mirrors.nju.edu.cn/alpine",
+    "https://mirrors.bfsu.edu.cn/alpine",
+    "https://mirrors.aliyun.com/alpine",
+    "https://mirrors.sjtug.sjtu.edu.cn/alpine",
+    // 官方/海外兜底
     "https://dl-cdn.alpinelinux.org/alpine",
     "https://mirrors.edge.kernel.org/alpine",
     "https://ftp.halifax.rwth-aachen.de/alpine",
     "https://alpine.ethz.ch/alpine",
     "https://mirror.csclub.uwaterloo.ca/alpine",
-    "https://mirrors.tuna.tsinghua.edu.cn/alpine",
 )
 
+// LXC 镜像索引仍从官方读取：国内镜像的 meta/1.0/index-user 存在全零/陈旧/HTML 的情况，
+// 不能作为路径来源；但同一路径的 rootfs 本体国内镜像通常可用（华为云最快/最新）。
 private const val LXC_INDEX = "https://images.linuxcontainers.org/meta/1.0/index-user"
-private const val LXC_BASE = "https://images.linuxcontainers.org"
+private val LXC_BASE_MIRRORS = listOf(
+    // 国内镜像优先 (abuild)。华为云虽返回 200 但内容是 HTML 门户，已剔除。
+    "https://mirrors.tuna.tsinghua.edu.cn/lxc-images",
+    "https://mirrors.bfsu.edu.cn/lxc-images",
+    "https://mirrors.cernet.edu.cn/lxc-images",
+    "https://mirrors.nju.edu.cn/lxc-images",
+    // 官方兜底
+    "https://images.linuxcontainers.org",
+)
 private const val DEBIAN_RELEASE = "bookworm"
+
+/**
+ * 国内 LXC 镜像通常滞后约一天，而官方索引只给最新时间戳。
+ * 生成“当天 + 前 1/2 天同一时刻”的候选路径；不存在的路径会 404 并被下载器跳过。
+ */
+private fun lxcCandidatePaths(path: String): List<String> {
+    val trimmed = path.trimEnd('/')
+    val segments = trimmed.split('/')
+    val stamp = segments.lastOrNull().orEmpty()
+    val match = Regex("""(\d{8})_(\d{2}:\d{2})""").matchEntire(stamp) ?: return listOf(trimmed)
+    val date = runCatching {
+        java.time.LocalDate.parse(match.groupValues[1], java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+    }.getOrNull() ?: return listOf(trimmed)
+    val time = match.groupValues[2]
+    return (0..2).map { days ->
+        val day = date.minusDays(days.toLong())
+            .format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+        (segments.dropLast(1) + "${day}_$time").joinToString("/")
+    }
+}
 
 /**
  * The per-distribution facts the shared installer and proot launcher need:
@@ -138,7 +174,16 @@ object DebianSpec : DistroSpec {
             ?: throw IOException("No Debian $DEBIAN_RELEASE image for $arch in LXC index")
         val path = line.split(';').getOrNull(5)?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw IOException("Malformed LXC index line: $line")
-        return listOf(LXC_BASE + path.removeSuffix("/") + "/rootfs.tar.xz")
+        // abuild: 国内镜像优先；先试当天路径，再试前 1-2 天同一时刻（镜像滞后），官方最后。
+        // 404/HTML 响应会由下载器的文件头校验剔除并继续下一个候选。
+        val officialBase = "https://images.linuxcontainers.org"
+        val domestic = LXC_BASE_MIRRORS.filter { it != officialBase }
+        val urls = mutableListOf<String>()
+        for (candidate in lxcCandidatePaths(path)) {
+            domestic.forEach { base -> urls += base + candidate.removeSuffix("/") + "/rootfs.tar.xz" }
+        }
+        urls += officialBase + path.removeSuffix("/") + "/rootfs.tar.xz"
+        return urls
     }
 
     override fun configure(rootfsDir: File) {
@@ -166,6 +211,15 @@ object DebianSpec : DistroSpec {
         // so staying root costs nothing; the file also covers shell-run apt-get.
         File(rootfsDir, "etc/apt/apt.conf.d").mkdirs()
         File(rootfsDir, "etc/apt/apt.conf.d/99kai-nosandbox").writeText("APT::Sandbox::User \"root\";\n")
+        // abuild: 包管理源切到清华镜像；rootfs 本体可能来自官方或其他镜像
+        File(rootfsDir, "etc/apt").mkdirs()
+        File(rootfsDir, "etc/apt/sources.list").writeText(
+            "deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware\n" +
+                "deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm-updates main contrib non-free non-free-firmware\n" +
+                "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware\n",
+        )
+        // 新版镜像可能带 deb822 的 debian.sources，保留会与上面的源重复
+        File(rootfsDir, "etc/apt/sources.list.d/debian.sources").delete()
     }
 
     /**
