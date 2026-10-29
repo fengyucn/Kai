@@ -21,7 +21,7 @@ Kai is built with Kotlin Multiplatform and Compose Multiplatform. It connects to
 - **Skills** — Install reusable instruction bundles in the SKILL.md format (Android)
 - **Autonomous heartbeat & scheduled tasks** — Periodic self-checks plus one-time or recurring tasks the AI schedules
 - **Linux sandbox** — On Android, the AI can run shell commands, scripts and packages in a Debian or Alpine environment
-- **Kai Build** — An Android coding environment with terminals and coding agents (Claude Code, Qoder CLI, OpenCode)
+- **Kai Build** — An Android coding environment with terminals and coding agents (CodeBuddy, Qoder CLI, Kimi Code)
 - **Encrypted storage** — Conversations are stored locally with encryption
 - **Settings export/import** — Back up and restore all settings as a JSON file
 - **Text to speech** — Listen to AI responses

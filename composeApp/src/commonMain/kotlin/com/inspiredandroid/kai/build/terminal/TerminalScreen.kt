@@ -66,7 +66,7 @@ class TerminalScreen(
         private set
 
     /**
-     * OSC 8 / stream / open-url URIs. Keyed by scheme+host+path so Claude’s
+     * OSC 8 / stream / open-url URIs. Keyed by scheme+host+path so an agent’s
      * many OAuth authorize variants (different redirect_uri) collapse to one
      * entry; value is the best (usually longest) full URL for that path.
      */
@@ -233,7 +233,7 @@ class TerminalScreen(
     }
 
     private companion object {
-        /** Enough for one auth URL + a docs link; keeps Claude setup from flooding. */
+        /** Enough for one auth URL + a docs link; keeps agent setup from flooding. */
         const val MAX_HYPERLINKS = 3
 
         // Stop at whitespace, quotes, ANSI ESC, or common terminal delimiters.

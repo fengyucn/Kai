@@ -594,7 +594,7 @@ class BuildEnvironmentManager(
         setStep(BuildStep.Agent, agentId = agent.id)
         ensureAgentPathProfile()
         val executor = executor()
-        val agentDirs = (AGENT_BIN_DIRS + "/root/.claude/downloads").joinToString(" ")
+        val agentDirs = AGENT_BIN_DIRS.joinToString(" ")
         executor.execute(
             "mkdir -p $agentDirs",
             timeoutSeconds = 30,
@@ -608,8 +608,7 @@ class BuildEnvironmentManager(
             Log.w(TAG, "${agent.id} install failed (exit detail): ${result.failureDetail()}")
             val probe = executor.execute(
                 "command -v ${agent.binary} 2>/dev/null; " +
-                    "ls -la $agentDirs 2>/dev/null; " +
-                    "ls -la /root/.local/share/claude/versions 2>/dev/null | tail -5",
+                    "ls -la $agentDirs 2>/dev/null",
                 timeoutSeconds = 30,
             )
             Log.w(TAG, "${agent.id} post-install probe: ${probe.stdout} ${probe.stderr}")
@@ -731,8 +730,8 @@ class BuildEnvironmentManager(
      * Login shells (`bash -l` / `bash -lc`) reset PATH from `/etc/profile`, which
      * drops the proot-injected vendor dirs. Vendor installers often skip writing
      * PATH into shell rc when their bin dir is already on PATH during install —
-     * so Claude (`~/.local/bin`) and OpenCode (`~/.opencode/bin`) vanish while
-     * agents that rewrite shell rc still work.
+     * so agents whose installers only write private dirs vanish unless we keep
+     * the catalog dirs on PATH.
      *
      * A tiny `/etc/profile.d` snippet puts every agent bin dir back for login
      * shells without depending on vendor rc edits. Written on the host so it
@@ -983,8 +982,7 @@ private fun BuildProotExecutor.hasBinary(binary: String): Boolean =
  * `/root/.local/bin` (even when already on the probe PATH) so login shells that
  * only keep a subset of vendor dirs still find every agent by name.
  *
- * Known layouts are catalog-driven via [AGENT_BIN_DIRS]; Claude additionally
- * keeps versioned binaries under `~/.local/share/claude/versions/<ver>`.
+ * Known layouts are catalog-driven via [AGENT_BIN_DIRS].
  */
 private fun BuildProotExecutor.ensureAgentBinary(binary: String): Boolean {
     // Safe: [binary] is a fixed catalog name, not user input.
@@ -1006,17 +1004,6 @@ private fun BuildProotExecutor.ensureAgentBinary(binary: String): Boolean {
                 exit 0
             fi
         done
-        # Claude install can leave only the versioned binary under share/.
-        if [ "${'$'}bin" = "claude" ]; then
-            ver_dir="/root/.local/share/claude/versions"
-            if [ -d "${'$'}ver_dir" ]; then
-                latest="${'$'}(ls -1 "${'$'}ver_dir" 2>/dev/null | sort -V | tail -1)"
-                if [ -n "${'$'}latest" ] && [ -x "${'$'}ver_dir/${'$'}latest" ]; then
-                    ln -sfn "${'$'}ver_dir/${'$'}latest" "${'$'}dest"
-                    exit 0
-                fi
-            fi
-        fi
         exit 0
         """.trimIndent(),
         timeoutSeconds = 30,

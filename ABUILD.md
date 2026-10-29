@@ -13,11 +13,13 @@ It is not intended for upstream merge unless maintainers want it.
 - `composeApp/src/androidMain/kotlin/com/inspiredandroid/kai/linux/RootfsDownloader.kt`
   - Validate gzip/xz magic bytes after download; a mirror answering HTTP 200 with an HTML page
     (observed on HuaweiCloud's LXC mirror) is rejected and the next candidate is tried
-- Coding agents: **Grok replaced by Qoder CLI** (`qodercli`, installed via `https://qoder.com/install`).
-  Agent bin dirs, PATH and detection are now catalog-driven (`BuildAgent.binDirs`), so adding or
-  replacing an agent no longer requires hard-coded paths in the environment manager.
-- Removed the Grok-only x.ai device-code hint; login URLs are captured generically from PTY text,
-  OSC 8/52 hyperlinks, and the `$BROWSER` wrapper.
+- Coding agents are fully catalog-driven (`BuildAgent.binDirs`); PATH, install dirs and binary
+  detection are derived from the catalog instead of hard-coded vendor paths.
+  - **CodeBuddy** (`codebuddy`, `https://www.codebuddy.cn/cli/install.sh`)
+  - **Qoder CLI** (`qodercli`, `https://qoder.com/install`)
+  - **Kimi Code** (`kimi`, `https://code.kimi.com/kimi-code/install.sh`)
+- Removed vendor-specific login hints (x.ai device code); login URLs are captured generically from
+  PTY text, OSC 8/52 hyperlinks, and the `$BROWSER` wrapper.
 
 ## Notes
 

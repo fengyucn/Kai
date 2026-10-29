@@ -26,11 +26,11 @@ object BuildAgents {
 
     val all: ImmutableList<BuildAgent> = persistentListOf(
         BuildAgent(
-            id = "claude-code",
-            title = "Claude Code",
-            binary = "claude",
-            installCommand = "curl -fsSL https://claude.ai/install.sh | bash",
-            binDirs = listOf("/root/.local/bin"),
+            id = "codebuddy",
+            title = "CodeBuddy",
+            binary = "codebuddy",
+            installCommand = "curl -fsSL https://www.codebuddy.cn/cli/install.sh | bash",
+            binDirs = listOf("/root/.codebuddy/bin", "/root/.local/bin"),
         ),
         BuildAgent(
             id = "qoder",
@@ -40,11 +40,11 @@ object BuildAgents {
             binDirs = listOf("/root/.qoder/bin", "/root/.local/bin"),
         ),
         BuildAgent(
-            id = "opencode",
-            title = "OpenCode",
-            binary = "opencode",
-            installCommand = "curl -fsSL https://opencode.ai/install | bash",
-            binDirs = listOf("/root/.opencode/bin", "/root/.local/bin"),
+            id = "kimicode",
+            title = "Kimi Code",
+            binary = "kimi",
+            installCommand = "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+            binDirs = listOf("/root/.kimi-code/bin", "/root/.local/bin"),
         ),
     )
 
